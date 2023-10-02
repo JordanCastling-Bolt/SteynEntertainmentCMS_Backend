@@ -39,7 +39,9 @@ app.get('/api/kpi/user', async (req, res) => {
 app.get('/api/kpi/geo', async (req, res) => {
   const query = `
     SELECT 
-      geo
+      geo,
+      geo.city,
+      geo.country
     FROM \`steynentertainment-800ea.analytics_403555927.events_20230929\`
   `;
   try {
