@@ -18,14 +18,29 @@ const app = express();
 app.use(cors());
 const port = 3001;
 
-// Query for user data
+async function getLatestTable() {
+  // List tables in the dataset
+  const dataset = bigquery.dataset('analytics_403555927');
+  const [tables] = await dataset.getTables();
+
+  // Sort table names in descending order to get the latest table
+  const sortedTables = tables.map(t => t.id).sort((a, b) => b.localeCompare(a));
+  return sortedTables[0];
+}
+
+
+// Query for User Data
 app.get('/api/kpi/user', async (req, res) => {
+  const latestTable = await getLatestTable();
   const query = `
     SELECT 
       user_id,
       user_pseudo_id
-    FROM \`steynentertainment-800ea.analytics_403555927.events_20230929\`
+    FROM \`steynentertainment-800ea.analytics_403555927.${latestTable}\`
+    ORDER BY event_timestamp DESC
+    LIMIT 100
   `;
+
   try {
     const [rows] = await bigquery.query({ query });
     res.json({ users: rows });
@@ -35,15 +50,20 @@ app.get('/api/kpi/user', async (req, res) => {
   }
 });
 
-// Query for geo data
+
+// Query for Geo Data
 app.get('/api/kpi/geo', async (req, res) => {
+  const latestTable = await getLatestTable();
   const query = `
     SELECT 
       geo,
       geo.city,
       geo.country
-    FROM \`steynentertainment-800ea.analytics_403555927.events_20230929\`
+    FROM \`steynentertainment-800ea.analytics_403555927.${latestTable}\`
+    ORDER BY event_timestamp DESC
+    LIMIT 100
   `;
+
   try {
     const [rows] = await bigquery.query({ query });
     res.json({ geo: rows });
@@ -53,16 +73,19 @@ app.get('/api/kpi/geo', async (req, res) => {
   }
 });
 
-// Query for mobile data
+// Query for Mobile Data
 app.get('/api/kpi/mobile', async (req, res) => {
+  const latestTable = await getLatestTable();
   const query = `
-  SELECT 
-  device,
-    device.category,
-    device.mobile_brand_name,
-    device.operating_system
-  FROM \`steynentertainment-800ea.analytics_403555927.events_20230929\`
-`;
+    SELECT 
+      device,
+      device.category,
+      device.mobile_brand_name,
+      device.operating_system
+    FROM \`steynentertainment-800ea.analytics_403555927.${latestTable}\`
+    ORDER BY event_timestamp DESC
+    LIMIT 100
+  `;
 
   try {
     const [rows] = await bigquery.query({ query });
