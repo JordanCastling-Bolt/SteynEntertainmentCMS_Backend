@@ -10,7 +10,7 @@ admin.initializeApp({
 });
 
 const bigquery = new BigQuery({
-  projectId: 'steynentertainment-800ea', // Replace with your project ID
+  projectId: 'steynentertainment-800ea', 
   credentials: serviceAccount,
 });
 
@@ -19,17 +19,32 @@ app.use(cors());
 const port = 3001;
 
 async function getLatestTable() {
-  // List tables in the dataset
   const dataset = bigquery.dataset('analytics_403555927');
   const [tables] = await dataset.getTables();
 
-  // Sort table names in descending order to get the latest table
-  const sortedTables = tables.map(t => t.id).sort((a, b) => b.localeCompare(a));
-  return sortedTables[0];
+  // Filter out tables that don't start with 'pseudonymous_users_'
+  const filteredTables = tables
+    .map(t => t.id)
+    .filter(tableName => tableName.startsWith('pseudonymous_users_'))
+    .sort((a, b) => b.localeCompare(a));
+
+  // Return the latest table
+  return filteredTables[0];
 }
 
 
-// Query for User Data
+async function runQuery(queryString, res, label) {
+  try {
+    const [rows] = await bigquery.query({ query: queryString });
+    const result = {};
+    result[label] = rows;
+    res.json(result);
+  } catch (error) {
+    console.error(`Error running ${label} query`, error);
+    res.status(500).send(error);
+  }
+}
+
 app.get('/api/kpi/user', async (req, res) => {
   const latestTable = await getLatestTable();
   const query = `
@@ -37,21 +52,11 @@ app.get('/api/kpi/user', async (req, res) => {
       user_id,
       user_pseudo_id
     FROM \`steynentertainment-800ea.analytics_403555927.${latestTable}\`
-    ORDER BY event_timestamp DESC
     LIMIT 100
   `;
-
-  try {
-    const [rows] = await bigquery.query({ query });
-    res.json({ users: rows });
-  } catch (error) {
-    console.error('Error running user query', error);
-    res.status(500).send(error);
-  }
+  runQuery(query, res, 'users');
 });
 
-
-// Query for Geo Data
 app.get('/api/kpi/geo', async (req, res) => {
   const latestTable = await getLatestTable();
   const query = `
@@ -60,20 +65,12 @@ app.get('/api/kpi/geo', async (req, res) => {
       geo.city,
       geo.country
     FROM \`steynentertainment-800ea.analytics_403555927.${latestTable}\`
-    ORDER BY event_timestamp DESC
+    ORDER BY last_updated_date DESC
     LIMIT 100
   `;
-
-  try {
-    const [rows] = await bigquery.query({ query });
-    res.json({ geo: rows });
-  } catch (error) {
-    console.error('Error running geo query', error);
-    res.status(500).send(error);
-  }
+  runQuery(query, res, 'geo');
 });
 
-// Query for Mobile Data
 app.get('/api/kpi/mobile', async (req, res) => {
   const latestTable = await getLatestTable();
   const query = `
@@ -83,20 +80,12 @@ app.get('/api/kpi/mobile', async (req, res) => {
       device.mobile_brand_name,
       device.operating_system
     FROM \`steynentertainment-800ea.analytics_403555927.${latestTable}\`
-    ORDER BY event_timestamp DESC
+    ORDER BY last_updated_date DESC
     LIMIT 100
   `;
-
-  try {
-    const [rows] = await bigquery.query({ query });
-    res.json({ mobile: rows });
-  } catch (error) {
-    console.error('Error running mobile query', error);
-    res.status(500).send(error);
-  }
+  runQuery(query, res, 'mobile');
 });
 
-// Start the server
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
