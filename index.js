@@ -1,90 +1,225 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
-const { BigQuery } = require('@google-cloud/bigquery');
-
+const {BigQuery} = require('@google-cloud/bigquery');
+const NodeCache = require('node-cache');
+const cache = new NodeCache();
 const serviceAccount = require('./steynentertainment-800ea-firebase-adminsdk-oz4fr-cfc129dd25.json');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-const bigquery = new BigQuery({
+const datasetId = 'analytics_403555927';
+const bigquery  = new BigQuery({
   projectId: 'steynentertainment-800ea', 
   credentials: serviceAccount,
 });
+const dataset = bigquery.dataset(datasetId);
 
 const app = express();
 app.use(cors());
 const port = 3001;
 
-async function getLatestTable() {
-  const dataset = bigquery.dataset('analytics_403555927');
+function getDateRangeTableName(range) {
+  const today = new Date();
+  switch (range) {
+    case '7days':
+      const weekAgo = new Date(today - 7 * 24 * 60 * 60 * 1000);
+      return `pseudonymous_users_${weekAgo.getFullYear()}${(weekAgo.getMonth() + 1).toString().padStart(2, '0')}${weekAgo.getDate().toString().padStart(2, '0')}`;
+    case '3months':
+      const threeMonthsAgo = new Date(today - 90 * 24 * 60 * 60 * 1000);
+      return `pseudonymous_users_${threeMonthsAgo.getFullYear()}${(threeMonthsAgo.getMonth() + 1).toString().padStart(2, '0')}${threeMonthsAgo.getDate().toString().padStart(2, '0')}`;
+    default:
+      return null;
+  }
+}
+
+async function getLatestTable(range) {
   const [tables] = await dataset.getTables();
 
-  // Filter out tables that don't start with 'pseudonymous_users_'
   const filteredTables = tables
     .map(t => t.id)
-    .filter(tableName => tableName.startsWith('pseudonymous_users_'))
+    .filter(tableName => tableName.startsWith('events_'))
     .sort((a, b) => b.localeCompare(a));
+
+  if (range) {
+    const rangeTable = getDateRangeTableName(range);
+    if (filteredTables.includes(rangeTable)) {
+      return rangeTable;
+    } 
+    // Handle case where specific range table isn't found
+    throw new Error(`Table for range ${range} not found.`);
+  }
 
   // Return the latest table
   return filteredTables[0];
 }
-
-
 async function runQuery(queryString, res, label) {
   try {
-    const [rows] = await bigquery.query({ query: queryString });
-    const result = {};
-    result[label] = rows;
-    res.json(result);
+    if (cache.has(queryString)) {
+      const cachedData = cache.get(queryString);
+      res.json(cachedData.map(item => item[label]));
+    } else {
+      const [rows] = await bigquery.query({ query: queryString });
+      const result = rows.map(row => ({ [label]: row }));
+      cache.set(queryString, result);
+      res.json(result);
+    }
   } catch (error) {
     console.error(`Error running ${label} query`, error);
     res.status(500).send(error);
   }
 }
 
-app.get('/api/kpi/user', async (req, res) => {
-  const latestTable = await getLatestTable();
-  const query = `
-    SELECT 
-      user_id,
-      user_pseudo_id
-    FROM \`steynentertainment-800ea.analytics_403555927.${latestTable}\`
-    LIMIT 100
-  `;
-  runQuery(query, res, 'users');
-});
+const createKPIRoute = (endpoint, querySelector, responseLabel) => {
+  app.get(`/api/kpi/${endpoint}`, async (req, res) => {
+    try {
+      const latestTable = await getLatestTable();
+      const query = querySelector(latestTable);
+      runQuery(query, res, responseLabel);
+    } catch (error) {
+      console.error(`Error fetching ${responseLabel}`, error);
+      res.status(500).send(error);
+    }
+  });
+};
 
-app.get('/api/kpi/geo', async (req, res) => {
-  const latestTable = await getLatestTable();
-  const query = `
+const querySelectors = {
+  user: (table) => `
     SELECT 
+      user_pseudo_id,
+      COUNT(is_active_user) as active_count
+    FROM \`${datasetId}.${table}\`
+    GROUP BY user_pseudo_id
+  `,
+  geo: (table) => `
+    WITH RankedEvents AS (
+      SELECT *,
+             ROW_NUMBER() OVER (PARTITION BY user_pseudo_id ORDER BY event_timestamp DESC) as rn
+      FROM \`${datasetId}.${table}\`
+    )
+    SELECT 
+      user_pseudo_id,
       geo,
       geo.city,
-      geo.country
-    FROM \`steynentertainment-800ea.analytics_403555927.${latestTable}\`
-    ORDER BY last_updated_date DESC
+      geo.country,
+      geo.region
+    FROM RankedEvents
+    WHERE rn = 1
     LIMIT 100
-  `;
-  runQuery(query, res, 'geo');
-});
-
-app.get('/api/kpi/mobile', async (req, res) => {
-  const latestTable = await getLatestTable();
-  const query = `
+  `,
+  mobile: (table) => `
     SELECT 
       device,
       device.category,
       device.mobile_brand_name,
+      device.mobile_model_name,
       device.operating_system
-    FROM \`steynentertainment-800ea.analytics_403555927.${latestTable}\`
-    ORDER BY last_updated_date DESC
+    FROM \`${datasetId}.${table}\`
+    ORDER BY event_timestamp DESC
     LIMIT 100
-  `;
-  runQuery(query, res, 'mobile');
+  `,
+  userEngagement: (table) => `
+    SELECT 
+      event_name,
+      COUNT(event_name) as event_count
+    FROM \`${datasetId}.${table}\`
+    GROUP BY event_name
+  `,
+  technology: (table) => `
+    SELECT 
+      device.browser,
+      COUNT(device.browser) as browser_count,
+      device.operating_system,
+      COUNT(device.operating_system) as os_count
+    FROM \`${datasetId}.${table}\`
+    GROUP BY device.browser, device.operating_system
+  `,
+  acquisition: (table) => `
+    SELECT 
+      traffic_source.source,
+      COUNT(traffic_source.source) as source_count,
+      traffic_source.medium,
+      COUNT(traffic_source.medium) as medium_count
+    FROM \`${datasetId}.${table}\`
+    GROUP BY traffic_source.source, traffic_source.medium
+  `,
+  behaviorFlow: (table) => `
+    SELECT 
+      event_name,
+      event_bundle_sequence_id
+    FROM \`${datasetId}.${table}\`
+    ORDER BY event_bundle_sequence_id
+    LIMIT 1000
+  `,
+  userRetention: (table) => `
+    SELECT DATE(TIMESTAMP_MICROS(event_timestamp)) as date, COUNT(DISTINCT user_pseudo_id) as retained_users
+    FROM \`${datasetId}.${table}\`
+    WHERE is_active_user = True
+    GROUP BY date
+    ORDER BY date DESC
+    LIMIT 30
+  `,
+  eventPopularity: (table) => `
+    SELECT 
+      event_name,
+      COUNT(event_name) as event_count
+    FROM \`${datasetId}.${table}\`
+    GROUP BY event_name
+    ORDER BY event_count DESC
+    LIMIT 10
+  `,
+  trafficSourceAnalysis: (table) => `
+    SELECT 
+      traffic_source.source,
+      traffic_source.medium,
+      traffic_source.name,
+      COUNT(traffic_source.source) as source_count,
+      COUNT(traffic_source.medium) as medium_count,
+      COUNT(traffic_source.name) as name_count
+    FROM \`${datasetId}.${table}\`
+    GROUP BY traffic_source.source, traffic_source.medium, traffic_source.name
+  `
+};
+
+// Example usage:
+createKPIRoute('user', querySelectors.user, 'user');
+createKPIRoute('geo', querySelectors.geo, 'geo');
+createKPIRoute('mobile', querySelectors.mobile, 'mobile');
+createKPIRoute('userEngagement', querySelectors.userEngagement, 'userEngagement');
+createKPIRoute('technology', querySelectors.technology, 'technology');
+createKPIRoute('acquisition', querySelectors.acquisition, 'acquisition');
+createKPIRoute('behaviorFlow', querySelectors.behaviorFlow, 'behaviorFlow');
+createKPIRoute('userRetention', querySelectors.userRetention, 'userRetention');
+createKPIRoute('eventPopularity', querySelectors.eventPopularity, 'eventPopularity');
+createKPIRoute('trafficSourceAnalysis', querySelectors.trafficSourceAnalysis, 'trafficSourceAnalysis');
+
+app.get('/api/kpi/userActivityOverTime', async (req, res) => {
+  try {
+    const [rows] = await getUserActivityOverTime();
+    const formattedData = rows.map(row => ({
+      date: row.date,
+      user_count: row.user_count
+    }));
+    res.json(formattedData);
+  } catch (error) {
+    console.error("Error fetching User Activity Over Time", error);
+    res.status(500).send(error);
+  }
 });
+
+async function getUserActivityOverTime() {
+  const latestTable = await getLatestTable();
+  const queryString = `
+    SELECT DATE(TIMESTAMP_MICROS(event_timestamp)) as date, COUNT(DISTINCT user_pseudo_id) as user_count
+    FROM \`${datasetId}.${latestTable}\`
+    GROUP BY date
+    ORDER BY date DESC
+    LIMIT 30;  
+  `;
+  return bigquery.query({ query: queryString });
+}
 
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
