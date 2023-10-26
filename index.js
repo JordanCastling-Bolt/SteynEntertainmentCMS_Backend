@@ -21,6 +21,13 @@ const app = express();
 app.use(cors());
 const port = 3001;
 
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  next();
+});
+
+
 function getDateRangeTableName(range) {
   const today = new Date();
   switch (range) {
