@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const https = require('https');
+const fs = require('fs');
 const admin = require('firebase-admin');
 const {BigQuery} = require('@google-cloud/bigquery');
 const NodeCache = require('node-cache');
@@ -9,6 +11,11 @@ const serviceAccount = require('./steynentertainment-800ea-firebase-adminsdk-oz4
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
+
+const options = {
+  key: fs.readFileSync('keys/mydomain.key'),
+  cert: fs.readFileSync('keys/mydomain.crt')
+};
 
 const datasetId = 'analytics_403555927';
 const bigquery  = new BigQuery({
@@ -97,14 +104,14 @@ const querySelectors = {
     SELECT 
       user_pseudo_id,
       COUNT(is_active_user) as active_count
-    FROM \`${datasetId}.${table}\`
+    FROM \`${datasetId}.events_*\`
     GROUP BY user_pseudo_id
   `,
   geo: (table) => `
     WITH RankedEvents AS (
       SELECT *,
              ROW_NUMBER() OVER (PARTITION BY user_pseudo_id ORDER BY event_timestamp DESC) as rn
-      FROM \`${datasetId}.${table}\`
+      FROM \`${datasetId}.events_*\`
     )
     SELECT 
       user_pseudo_id,
@@ -123,7 +130,7 @@ const querySelectors = {
       device.mobile_brand_name,
       device.mobile_model_name,
       device.operating_system
-    FROM \`${datasetId}.${table}\`
+    FROM \`${datasetId}.events_*\`
     ORDER BY event_timestamp DESC
     LIMIT 100
   `,
@@ -131,7 +138,7 @@ const querySelectors = {
     SELECT 
       event_name,
       COUNT(event_name) as event_count
-    FROM \`${datasetId}.${table}\`
+    FROM \`${datasetId}.events_*\`
     GROUP BY event_name
   `,
   technology: (table) => `
@@ -140,7 +147,7 @@ const querySelectors = {
       COUNT(device.browser) as browser_count,
       device.operating_system,
       COUNT(device.operating_system) as os_count
-    FROM \`${datasetId}.${table}\`
+    FROM \`${datasetId}.events_*\`
     GROUP BY device.browser, device.operating_system
   `,
   acquisition: (table) => `
@@ -149,20 +156,20 @@ const querySelectors = {
       COUNT(traffic_source.source) as source_count,
       traffic_source.medium,
       COUNT(traffic_source.medium) as medium_count
-    FROM \`${datasetId}.${table}\`
+    FROM \`${datasetId}.events_*\`
     GROUP BY traffic_source.source, traffic_source.medium
   `,
   behaviorFlow: (table) => `
     SELECT 
       event_name,
       event_bundle_sequence_id
-    FROM \`${datasetId}.${table}\`
+    FROM \`${datasetId}.events_*\`
     ORDER BY event_bundle_sequence_id
     LIMIT 1000
   `,
   userRetention: (table) => `
     SELECT DATE(TIMESTAMP_MICROS(event_timestamp)) as date, COUNT(DISTINCT user_pseudo_id) as retained_users
-    FROM \`${datasetId}.${table}\`
+    FROM \`${datasetId}.events_*\`
     WHERE is_active_user = True
     GROUP BY date
     ORDER BY date DESC
@@ -172,7 +179,7 @@ const querySelectors = {
     SELECT 
       event_name,
       COUNT(event_name) as event_count
-    FROM \`${datasetId}.${table}\`
+    FROM \`${datasetId}.events_*\`
     GROUP BY event_name
     ORDER BY event_count DESC
     LIMIT 10
@@ -185,7 +192,7 @@ const querySelectors = {
       COUNT(traffic_source.source) as source_count,
       COUNT(traffic_source.medium) as medium_count,
       COUNT(traffic_source.name) as name_count
-    FROM \`${datasetId}.${table}\`
+    FROM \`${datasetId}.events_*\`
     GROUP BY traffic_source.source, traffic_source.medium, traffic_source.name
   `
 };
@@ -201,6 +208,7 @@ createKPIRoute('behaviorFlow', querySelectors.behaviorFlow, 'behaviorFlow');
 createKPIRoute('userRetention', querySelectors.userRetention, 'userRetention');
 createKPIRoute('eventPopularity', querySelectors.eventPopularity, 'eventPopularity');
 createKPIRoute('trafficSourceAnalysis', querySelectors.trafficSourceAnalysis, 'trafficSourceAnalysis');
+createKPIRoute('userActivityOverTime', querySelectors.user, 'userActivityOverTime');
 
 app.get('/api/kpi/userActivityOverTime', async (req, res) => {
   try {
@@ -219,15 +227,21 @@ app.get('/api/kpi/userActivityOverTime', async (req, res) => {
 async function getUserActivityOverTime() {
   const latestTable = await getLatestTable();
   const queryString = `
-    SELECT DATE(TIMESTAMP_MICROS(event_timestamp)) as date, COUNT(DISTINCT user_pseudo_id) as user_count
-    FROM \`${datasetId}.${latestTable}\`
-    GROUP BY date
-    ORDER BY date DESC
-    LIMIT 30;  
+      SELECT 
+          DATE(TIMESTAMP_MICROS(event_timestamp)) as date, 
+          user_pseudo_id, 
+          COUNT(*) as active_count
+      FROM \`${datasetId}.events_*\`
+      GROUP BY date, user_pseudo_id
+      ORDER BY date DESC
+      LIMIT 100; 
   `;
   return bigquery.query({ query: queryString });
 }
 
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+
+
+https.createServer(options, app).listen(port, () => {
+  console.log(`Server running on https://localhost:${port}`);
 });
+
