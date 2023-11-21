@@ -38,16 +38,19 @@ app.use((req, res, next) => {
 function getDateRangeTableName(range) {
   const today = new Date();
   switch (range) {
-    case '7days':
+    case '7days': {
       const weekAgo = new Date(today - 7 * 24 * 60 * 60 * 1000);
       return `pseudonymous_users_${weekAgo.getFullYear()}${(weekAgo.getMonth() + 1).toString().padStart(2, '0')}${weekAgo.getDate().toString().padStart(2, '0')}`;
-    case '3months':
+    }
+    case '3months': {
       const threeMonthsAgo = new Date(today - 90 * 24 * 60 * 60 * 1000);
       return `pseudonymous_users_${threeMonthsAgo.getFullYear()}${(threeMonthsAgo.getMonth() + 1).toString().padStart(2, '0')}${threeMonthsAgo.getDate().toString().padStart(2, '0')}`;
+    }
     default:
       return null;
   }
 }
+
 
 async function getLatestTable(range) {
   const [tables] = await dataset.getTables();
