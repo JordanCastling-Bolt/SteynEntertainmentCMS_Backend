@@ -100,14 +100,14 @@ const createKPIRoute = (endpoint, querySelector, responseLabel) => {
 };
 
 const querySelectors = {
-  user: (table) => `
+  user: `
     SELECT 
       user_pseudo_id,
       COUNT(is_active_user) as active_count
     FROM \`${datasetId}.events_*\`
     GROUP BY user_pseudo_id
   `,
-  geo: (table) => `
+  geo: `
     WITH RankedEvents AS (
       SELECT *,
              ROW_NUMBER() OVER (PARTITION BY user_pseudo_id ORDER BY event_timestamp DESC) as rn
@@ -123,7 +123,7 @@ const querySelectors = {
     WHERE rn = 1
     LIMIT 100
   `,
-  mobile: (table) => `
+  mobile: `
     SELECT 
       device,
       device.category,
@@ -134,14 +134,14 @@ const querySelectors = {
     ORDER BY event_timestamp DESC
     LIMIT 100
   `,
-  userEngagement: (table) => `
+  userEngagement: `
     SELECT 
       event_name,
       COUNT(event_name) as event_count
     FROM \`${datasetId}.events_*\`
     GROUP BY event_name
   `,
-  technology: (table) => `
+  technology: `
     SELECT 
       device.browser,
       COUNT(device.browser) as browser_count,
@@ -150,7 +150,7 @@ const querySelectors = {
     FROM \`${datasetId}.events_*\`
     GROUP BY device.browser, device.operating_system
   `,
-  acquisition: (table) => `
+  acquisition:`
     SELECT 
       traffic_source.source,
       COUNT(traffic_source.source) as source_count,
@@ -159,7 +159,7 @@ const querySelectors = {
     FROM \`${datasetId}.events_*\`
     GROUP BY traffic_source.source, traffic_source.medium
   `,
-  behaviorFlow: (table) => `
+  behaviorFlow: `
     SELECT 
       event_name,
       event_bundle_sequence_id
@@ -167,7 +167,7 @@ const querySelectors = {
     ORDER BY event_bundle_sequence_id
     LIMIT 1000
   `,
-  userRetention: (table) => `
+  userRetention:`
     SELECT DATE(TIMESTAMP_MICROS(event_timestamp)) as date, COUNT(DISTINCT user_pseudo_id) as retained_users
     FROM \`${datasetId}.events_*\`
     WHERE is_active_user = True
@@ -175,7 +175,7 @@ const querySelectors = {
     ORDER BY date DESC
     LIMIT 30
   `,
-  eventPopularity: (table) => `
+  eventPopularity: `
     SELECT 
       event_name,
       COUNT(event_name) as event_count
@@ -184,7 +184,7 @@ const querySelectors = {
     ORDER BY event_count DESC
     LIMIT 10
   `,
-  trafficSourceAnalysis: (table) => `
+  trafficSourceAnalysis: `
     SELECT 
       traffic_source.source,
       traffic_source.medium,
@@ -195,7 +195,7 @@ const querySelectors = {
     FROM \`${datasetId}.events_*\`
     GROUP BY traffic_source.source, traffic_source.medium, traffic_source.name
   `,
-  getUserActivityOverTime: (table) => `
+  getUserActivityOverTime: `
   SELECT 
   DATE(TIMESTAMP_MICROS(event_timestamp)) as date, 
   user_pseudo_id, 
