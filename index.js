@@ -3,7 +3,7 @@ const cors = require('cors');
 const https = require('https');
 const fs = require('fs');
 const admin = require('firebase-admin');
-const {BigQuery} = require('@google-cloud/bigquery');
+const { BigQuery } = require('@google-cloud/bigquery');
 const NodeCache = require('node-cache');
 const cache = new NodeCache();
 const serviceAccount = require('./steynentertainment-800ea-firebase-adminsdk-oz4fr-cfc129dd25.json');
@@ -18,8 +18,8 @@ const options = {
 };
 
 const datasetId = 'analytics_403555927';
-const bigquery  = new BigQuery({
-  projectId: 'steynentertainment-800ea', 
+const bigquery = new BigQuery({
+  projectId: 'steynentertainment-800ea',
   credentials: serviceAccount,
 });
 const dataset = bigquery.dataset(datasetId);
@@ -61,7 +61,7 @@ async function getLatestTable(range) {
     const rangeTable = getDateRangeTableName(range);
     if (filteredTables.includes(rangeTable)) {
       return rangeTable;
-    } 
+    }
     // Handle case where specific range table isn't found
     throw new Error(`Table for range ${range} not found.`);
   }
@@ -194,7 +194,17 @@ const querySelectors = {
       COUNT(traffic_source.name) as name_count
     FROM \`${datasetId}.events_*\`
     GROUP BY traffic_source.source, traffic_source.medium, traffic_source.name
-  `
+  `,
+  getUserActivityOverTime: (table) => `
+  SELECT 
+  DATE(TIMESTAMP_MICROS(event_timestamp)) as date, 
+  user_pseudo_id, 
+  COUNT(*) as active_count
+  FROM \`${datasetId}.events_*\`
+    GROUP BY date, user_pseudo_id
+  ORDER BY date DESC
+  LIMIT 100; 
+  `,
 };
 
 // Example usage:
@@ -208,38 +218,7 @@ createKPIRoute('behaviorFlow', querySelectors.behaviorFlow, 'behaviorFlow');
 createKPIRoute('userRetention', querySelectors.userRetention, 'userRetention');
 createKPIRoute('eventPopularity', querySelectors.eventPopularity, 'eventPopularity');
 createKPIRoute('trafficSourceAnalysis', querySelectors.trafficSourceAnalysis, 'trafficSourceAnalysis');
-createKPIRoute('userActivityOverTime', querySelectors.user, 'userActivityOverTime');
-
-app.get('/api/kpi/userActivityOverTime', async (req, res) => {
-  try {
-    const [rows] = await getUserActivityOverTime();
-    const formattedData = rows.map(row => ({
-      date: row.date,
-      user_count: row.user_count
-    }));
-    res.json(formattedData);
-  } catch (error) {
-    console.error("Error fetching User Activity Over Time", error);
-    res.status(500).send(error);
-  }
-});
-
-async function getUserActivityOverTime() {
-  const latestTable = await getLatestTable();
-  const queryString = `
-      SELECT 
-          DATE(TIMESTAMP_MICROS(event_timestamp)) as date, 
-          user_pseudo_id, 
-          COUNT(*) as active_count
-      FROM \`${datasetId}.events_*\`
-      GROUP BY date, user_pseudo_id
-      ORDER BY date DESC
-      LIMIT 100; 
-  `;
-  return bigquery.query({ query: queryString });
-}
-
-
+createKPIRoute('userActivityOverTime', querySelectors.getUserActivityOverTime, 'userActivityOverTime');
 
 https.createServer(options, app).listen(port, () => {
   console.log(`Server running on https://localhost:${port}`);
