@@ -104,11 +104,13 @@ const createKPIRoute = (endpoint, querySelector, responseLabel) => {
 
 const querySelectors = {
   user: ()=> `
-    SELECT 
-      user_pseudo_id,
-      COUNT(is_active_user) as active_count
-    FROM \`${datasetId}.events_*\`
-    GROUP BY user_pseudo_id
+  SELECT 
+  DATE(TIMESTAMP_MICROS(event_timestamp)) as signup_day,
+  COUNT(DISTINCT user_pseudo_id) as unique_user_count
+FROM \`${datasetId}.events_*\`
+WHERE event_name = 'login'
+GROUP BY signup_day;
+
   `,
   geo: ()=>`
     WITH RankedEvents AS (
