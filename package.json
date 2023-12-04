@@ -18,7 +18,7 @@
     "node-cache": "^5.1.2"
   },
   "devDependencies": {
-    "eslint": "^8.54.0",
+    "eslint": "^8.55.0",
     "eslint-plugin-react": "^7.33.2"
   }
 }
